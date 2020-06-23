@@ -1812,17 +1812,24 @@ int sx1302_parse(lgw_context_t * context, struct lgw_pkt_rx_s * p) {
         timestamp_correction = 0;
     }
 
-    /* Update counter reference / wrap status before expanding */
-    timestamp_counter_get(&counter_us, false);
+    /* Convert sub-us value into micros and do correction */
+    p->count_us = timestamp_counter_expand(&counter_us, false, pkt.timestamp_cnt) - timestamp_correction;
 
-    /* Scale 32 MHz packet timestamp to 1 MHz (microseconds) */
-    p->count_us = pkt.timestamp_cnt / 32;
-
-    /* Expand 27-bits counter to 32-bits counter, based on current wrapping status */
-    p->count_us = timestamp_pkt_expand(&counter_us, p->count_us);
-
-    /* Packet timestamp corrected */
-    p->count_us = p->count_us - timestamp_correction;
+#if 0 // debug code to check for failed submicros/micros handling
+    {
+        static uint32_t last_valid = 0;
+        static uint32_t last_us32 = 0;
+        int32_t diff = p->count_us - last_us32;
+        printf("XXXXXXXXXXXXXXXX pkt=%08X last=%08X diff=%08X/%d  seqno=%04X\n",
+               p->count_us, last_us32, diff, diff, (p->payload[1]<<8)|p->payload[2]);
+        if( last_valid && diff > 30000000 ) {
+            printf("XXXXXXXXXXXXXXXX ERROR jump ahead count_us\n");
+            exit(1);
+        }
+        last_us32 = p->count_us;
+        last_valid = 1;
+    }
+#endif
 
     /* Packet CRC status */
     p->crc = pkt.rx_crc16_value;

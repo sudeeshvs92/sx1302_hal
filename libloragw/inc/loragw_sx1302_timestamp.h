@@ -43,13 +43,12 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 @struct timestamp_counter_s
 @brief context to maintain the internal counters (inst and pps trig) rollover status
 */
-struct timestamp_info_s {
-    uint32_t counter_us_27bits_ref;     /* reference value (last read) */
-    uint8_t  counter_us_27bits_wrap;    /* rollover/wrap status */
-};
 typedef struct timestamp_counter_s {
-    struct timestamp_info_s inst; /* holds current reference of the instantaneous counter */
-    struct timestamp_info_s pps;  /* holds current reference of the pps-trigged counter */
+    struct timestamp_info_s {
+        uint32_t counter_subus;
+        int32_t  epochs_subus;
+        int64_t  clmono_ref;
+    } inst, pps;
 } timestamp_counter_t;
 
 /* -------------------------------------------------------------------------- */
@@ -73,27 +72,19 @@ void timestamp_counter_delete(timestamp_counter_t * self);
 @brief Update the counter wrapping status based on given current counter
 @param self     Pointer to the counter handler
 @param pps      Set to true to update the PPS trig counter status
-@param cnt      Current value of the counter to be used for the update
+@param cnt      Current value of the sub microsecond counter to be used for the update
 @return N/A
 */
 void timestamp_counter_update(timestamp_counter_t * self, bool pps, uint32_t cnt);
 
 /**
-@brief Convert the 27-bits counter given by the SX1302 to a 32-bits counter which wraps on a uint32_t.
-@param self     Pointer to the counter handler
-@param pps      Set to true to expand the counter based on the PPS trig wrapping status
-@param cnt_us   The 27-bits counter to be expanded
-@return the 32-bits counter
+@brief Convert the 32-bits sub-microsecond counter given by the SX1302 to a 32-bits microsecond counter.
+@param self      Pointer to the counter state
+@param pps       Set to true to expand the counter based on the PPS trig wrapping status
+@param cnt_subus The 32-bits sub microsecond counter to be converted
+@return the 32-bits microsecond counter
 */
-uint32_t timestamp_counter_expand(timestamp_counter_t * self, bool pps, uint32_t cnt_us);
-
-/**
-@brief Convert the 27-bits packet timestamp to a 32-bits counter which wraps on a uint32_t.
-@param self     Pointer to the counter handler
-@param cnt_us   The packet 27-bits counter to be expanded
-@return the 32-bits counter
-*/
-uint32_t timestamp_pkt_expand(timestamp_counter_t * self, uint32_t cnt_us);
+uint32_t timestamp_counter_expand(timestamp_counter_t * self, bool pps, uint32_t cnt_subus);
 
 /**
 @brief Reads the SX1302 internal counter register, and return the 32-bits 1 MHz counter

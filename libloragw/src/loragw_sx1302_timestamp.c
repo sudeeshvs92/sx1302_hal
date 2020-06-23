@@ -21,9 +21,11 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 /* -------------------------------------------------------------------------- */
 /* --- DEPENDANCIES --------------------------------------------------------- */
 
+#define _POSIX_C_SOURCE 199309L
 #include <stdint.h>     /* C99 types */
 #include <stdio.h>      /* printf fprintf */
 #include <memory.h>     /* memset */
+#include <time.h>       /* clock monotonic */
 
 #include "loragw_sx1302_timestamp.h"
 #include "loragw_reg.h"
@@ -62,6 +64,16 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE FUNCTIONS DEFINITION ----------------------------------------- */
 
+static int64_t clock_monotonic() {
+    struct timespec ts;
+    if( clock_gettime(CLOCK_MONOTONIC, &ts) != 0 ) {
+        printf("ERROR: clock_gettime(CLOCK_MONOTONIC, ..) failed!\n");
+        return 0;
+    }
+    /* Return subus resolution - rounded, +1 makes sure 0 is never returned */
+    return ((ts.tv_sec+1)*1000000000LL + ts.tv_nsec + 16) / 32;
+}
+
 /* -------------------------------------------------------------------------- */
 /* --- PUBLIC FUNCTIONS DEFINITION ------------------------------------------ */
 
@@ -77,17 +89,36 @@ void timestamp_counter_delete(timestamp_counter_t * self) {
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-void timestamp_counter_update(timestamp_counter_t * self, bool pps, uint32_t cnt) {
-    struct timestamp_info_s* tinfo = (pps == true) ? &self->pps : &self->inst;
-
-    /* Check if counter has wrapped, and update wrap status if necessary */
-    if (cnt < tinfo->counter_us_27bits_ref) {
-        tinfo->counter_us_27bits_wrap += 1;
-        tinfo->counter_us_27bits_wrap %= 32;
+void timestamp_counter_update(timestamp_counter_t * self, bool pps, uint32_t cnt_subus) {
+    struct timestamp_info_s* tinfo = pps ? &self->pps : &self->inst;
+    int64_t now = clock_monotonic();
+    if( tinfo->clmono_ref == 0 ) {
+        tinfo->clmono_ref = now;
+        tinfo->counter_subus = cnt_subus;
+        return;
     }
-
-    /* Update counter reference */
-    tinfo->counter_us_27bits_ref = cnt;
+    /*
+     * Let m1,m2 be previous/current clock monotonic (64bit)
+     * and u1,u2 corresponding 32bit submicrosecond recordings from SX1302
+     * There are the following errors to consider:
+     *   e1 = (int32_t)(m1-u1)
+     *   e2 = (int32_t)(m2-u2)
+     * e1,e2 are related to local CPU processing jitter since the time between clock_monotonic() and
+     * the retrieval of the submicrosecond counter varies due to processing overhead.
+     *   e3 = (int2_t)((uint32_t)(u2-u1) - (uint32_t)(m2-m2))
+     * e3 is the CPU clock drift against the submicrosecond counter.
+     * E=e1+e2+e3 is significantly smaller than 2^31 submicroseconds (<<<~67s)
+     * The assumption is that the submicrosecond counter may have rolled over possibly multiple times
+     * betwen calls to timestamp_counter_update().
+     * Thus:
+     *   m2-m1 = k*2^32 + (uint32_t)(u2-u1) + E
+     * and the number of rollovers is calculated as:
+     *   k*2^32 = (m2-m1) - (uint32_t)(u2-u1) - E   and  -2^31 <<< E <<< 2^31
+     */
+    int64_t diff = now - tinfo->clmono_ref - (uint32_t)(cnt_subus - tinfo->counter_subus);
+    tinfo->epochs_subus += ((diff + (1U<<31)) >> 32) + (cnt_subus < tinfo->counter_subus ? 1:0);
+    tinfo->counter_subus = cnt_subus;
+    tinfo->clmono_ref = now;
 }
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -95,7 +126,7 @@ void timestamp_counter_update(timestamp_counter_t * self, bool pps, uint32_t cnt
 uint32_t timestamp_counter_get(timestamp_counter_t * self, bool pps) {
     int x;
     uint8_t buff[4];
-    uint32_t counter_us_raw_27bits_now;
+    uint32_t counter_subus;
     int32_t msb;
 
     /* Get the 32MHz timestamp counter - 4 bytes */
@@ -128,25 +159,22 @@ uint32_t timestamp_counter_get(timestamp_counter_t * self, bool pps) {
         }
     }
 
-    counter_us_raw_27bits_now = (buff[0]<<24) | (buff[1]<<16) | (buff[2]<<8) | buff[3];
-
-    /* Scale to 1MHz */
-    counter_us_raw_27bits_now /= 32;
+    counter_subus = (buff[0]<<24) | (buff[1]<<16) | (buff[2]<<8) | buff[3];
 
     /* Update counter wrapping status */
-    timestamp_counter_update(self, pps, counter_us_raw_27bits_now);
+    timestamp_counter_update(self, pps, counter_subus);
 
-    /* Convert 27-bits counter to 32-bits counter */
-    return timestamp_counter_expand(self, pps, counter_us_raw_27bits_now);
+    /* Convert 1/32 microsecond to microsecond counter  */
+    return timestamp_counter_expand(self, pps, counter_subus);
 }
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-uint32_t timestamp_counter_expand(timestamp_counter_t * self, bool pps, uint32_t cnt_us) {
+uint32_t timestamp_counter_expand(timestamp_counter_t * self, bool pps, uint32_t cnt_subus) {
     struct timestamp_info_s* tinfo = (pps == true) ? &self->pps : &self->inst;
-    uint32_t counter_us_32bits;
-
-    counter_us_32bits = (tinfo->counter_us_27bits_wrap << 27) | cnt_us;
+    /* Convert submicroseconds (1/32us = 31.25ns) into microseconds */
+    int32_t delta_subus = (int32_t)(cnt_subus - tinfo->counter_subus); /* this *must* be a 32bit signed value */
+    uint32_t counter_us_32bits = (((int64_t)tinfo->epochs_subus << 32) + tinfo->counter_subus + delta_subus) >> 5;
 
 #if 0
     /* DEBUG: to be enabled when running test_loragw_counter test application
@@ -154,40 +182,12 @@ uint32_t timestamp_counter_expand(timestamp_counter_t * self, bool pps, uint32_t
         > set datafile separator comma
         > plot for [col=1:2:1] 'log_count.txt' using col with lines
     */
-    printf("%u,%u,%u\n", cnt_us, counter_us_32bits, tinfo->counter_us_27bits_wrap);
+    printf("%u,%u,%llu\n", cnt_subus, counter_us_32bits, tinfo->counter_subus);
 #endif
 
     return counter_us_32bits;
 }
 
-
-/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-
-uint32_t timestamp_pkt_expand(timestamp_counter_t * self, uint32_t pkt_cnt_us) {
-    struct timestamp_info_s* tinfo = &self->inst;
-    uint32_t counter_us_32bits;
-    uint8_t wrap_status;
-
-    /* Check if counter has wrapped since the packet has been received in the sx1302 internal FIFO */
-    /* If the sx1302 counter was greater than the pkt timestamp, it means that the internal counter
-        hasn't rolled over since the packet has been received by the sx1302
-        case 1: --|-P--|----|--R-|----|--||-|----|-- : use current wrap status counter
-        case 2: --|-P-||-|-R--|-- : use previous wrap status counter
-        P : packet received in sx1302 internal FIFO
-        R : read packet from sx1302 internal FIFO
-        | : last update internal counter ref value.
-        ||: sx1302 internal counter rollover (wrap)
-    */
-
-    /* Use current wrap counter or previous ? */
-    wrap_status = tinfo->counter_us_27bits_wrap - ((tinfo->counter_us_27bits_ref >= pkt_cnt_us) ? 0 : 1);
-    wrap_status &= 0x1F; /* [0..31] */
-
-    /* Expand packet counter */
-    counter_us_32bits = (wrap_status << 27) | pkt_cnt_us;
-
-    return counter_us_32bits;
-}
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
