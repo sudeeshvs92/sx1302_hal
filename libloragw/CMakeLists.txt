@@ -6,7 +6,8 @@ add_library(${TARGET} "")
 # Set the DEBUG_* to 1 to activate debug mode in individual modules.
 # Warning: that makes the module *very verbose*, do not use for production
 option(DEBUG_AUX "Active debug mode in AUX module" OFF)
-option(DEBUG_SPI "Active debug mode in SPI module" OFF)
+option(DEBUG_COM "Active debug mode in COM module" OFF)
+option(DEBUG_MCU "Active debug mode in MCU module" OFF)
 option(DEBUG_I2C "Active debug mode in I2C module" OFF)
 option(DEBUG_REG "Active debug mode in REG module" OFF)
 option(DEBUG_HAL "Active debug mode in HAL module" OFF)
@@ -15,9 +16,11 @@ option(DEBUG_GPS "Active debug mode in GPS module" OFF)
 option(DEBUG_RAD "Active debug mode in RAD module" OFF)
 option(DEBUG_CAL "Active debug mode in CAL module" OFF)
 option(DEBUG_SX1302 "Active debug mode in SX1302 module" OFF)
+option(DEBUG_FTIME "Active debug mode in FTIME module" OFF)
 
 message("-- Build with debug AUX: ${DEBUG_AUX}")
-message("-- Build with debug SPI: ${DEBUG_SPI}")
+message("-- Build with debug COM: ${DEBUG_COM}")
+message("-- Build with debug MCU: ${DEBUG_MCU}")
 message("-- Build with debug I2C: ${DEBUG_I2C}")
 message("-- Build with debug REG: ${DEBUG_REG}")
 message("-- Build with debug HAL: ${DEBUG_HAL}")
@@ -26,6 +29,7 @@ message("-- Build with debug GPS: ${DEBUG_GPS}")
 message("-- Build with debug RAD: ${DEBUG_RAD}")
 message("-- Build with debug CAL: ${DEBUG_CAL}")
 message("-- Build with debug SX1302: ${DEBUG_SX1302}")
+message("-- Build with debug FTIME: ${DEBUG_FTIME}")
 
 # --  add the compile options
 target_compile_options(
@@ -40,20 +44,34 @@ target_compile_options(
 target_sources(
 	${TARGET}
 	PRIVATE
+	${CMAKE_CURRENT_LIST_DIR}/src/loragw_ad5338r.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_aux.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_cal.c
+	${CMAKE_CURRENT_LIST_DIR}/src/loragw_com.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_debug.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_gps.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_hal.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_i2c.c
+	${CMAKE_CURRENT_LIST_DIR}/src/loragw_lbt.c
+	${CMAKE_CURRENT_LIST_DIR}/src/loragw_mcu.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_reg.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_spi.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_stts751.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_sx125x.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_sx1250.c
+	${CMAKE_CURRENT_LIST_DIR}/src/loragw_sx1261.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_sx1302.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_sx1302_rx.c
 	${CMAKE_CURRENT_LIST_DIR}/src/loragw_sx1302_timestamp.c
+	${CMAKE_CURRENT_LIST_DIR}/src/loragw_usb.c
+	${CMAKE_CURRENT_LIST_DIR}/src/sx125x_com.c
+	${CMAKE_CURRENT_LIST_DIR}/src/sx125x_spi.c
+	${CMAKE_CURRENT_LIST_DIR}/src/sx1250_com.c
+	${CMAKE_CURRENT_LIST_DIR}/src/sx1250_spi.c
+	${CMAKE_CURRENT_LIST_DIR}/src/sx1250_usb.c
+	${CMAKE_CURRENT_LIST_DIR}/src/sx1261_com.c
+	${CMAKE_CURRENT_LIST_DIR}/src/sx1261_spi.c
+	${CMAKE_CURRENT_LIST_DIR}/src/sx1261_usb.c
 	$<TARGET_OBJECTS:parson>
 	$<TARGET_OBJECTS:base64>
 	$<TARGET_OBJECTS:tinymt32>
@@ -66,6 +84,7 @@ set (
 	${CMAKE_CURRENT_LIST_DIR}/inc/loragw_gps.h
 	${CMAKE_CURRENT_LIST_DIR}/inc/loragw_hal.h
 	${CMAKE_CURRENT_LIST_DIR}/inc/loragw_reg.h
+	# TODO: update to v2.0.0
 )
 
 target_include_directories(
@@ -142,16 +161,19 @@ install(
 # -- add test programs
 foreach(
 	TEST
-	test_loragw_cal
+	test_loragw_cal_sx125x
 	test_loragw_capture_ram
+	test_loragw_com
+	test_loragw_com_sx1250
+	test_loragw_com_sx1261
 	test_loragw_counter
 	test_loragw_gps
 	test_loragw_hal_rx
 	test_loragw_hal_tx
 	test_loragw_i2c
 	test_loragw_reg
-	test_loragw_spi
-	test_loragw_spi_sx1250
+	test_loragw_sx1261_rssi
+	test_loragw_toa
 	)
 
 	add_executable(${TEST} "")

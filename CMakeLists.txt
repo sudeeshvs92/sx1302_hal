@@ -65,8 +65,14 @@ add_subdirectory(libloragw)
 # -- add packet forwarder
 add_subdirectory(packet_forwarder)
 
+# --add util_boot
+add_subdirectory(util_boot)
+
 # --add util_chip_id
 add_subdirectory(util_chip_id)
 
 # --add util_net_downlink
 add_subdirectory(util_net_downlink)
+
+# --add util_spectral_scan
+add_subdirectory(util_spectral_scan)
